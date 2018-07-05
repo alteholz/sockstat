@@ -1,0 +1,142 @@
+.\"-
+.\" Copyright (c) 1999 Dag-Erling Coïdan Smørgrav
+.\" All rights reserved.
+.\"
+.\" Redistribution and use in source and binary forms, with or without
+.\" modification, are permitted provided that the following conditions
+.\" are met:
+.\" 1. Redistributions of source code must retain the above copyright
+.\"    notice, this list of conditions and the following disclaimer
+.\"    in this position and unchanged.
+.\" 2. Redistributions in binary form must reproduce the above copyright
+.\"    notice, this list of conditions and the following disclaimer in the
+.\"    documentation and/or other materials provided with the distribution.
+.\" 3. The name of the author may not be used to endorse or promote products
+.\"    derived from this software without specific prior written permission.
+.\"
+.\" THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
+.\" IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
+.\" OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.
+.\" IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT,
+.\" INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT
+.\" NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
+.\" DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
+.\" THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+.\" (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
+.\" THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+.\"
+.\" $FreeBSD: src/usr.bin/sockstat/sockstat.1,v 1.22 2008/05/19 11:32:44 bms Exp $
+.\"
+.Dd May 18, 2008
+.Dt SOCKSTAT 1
+.Os
+.Sh NAME
+.Nm sockstat
+.Nd list open sockets
+.Sh SYNOPSIS
+.Nm
+.Op Fl clh
+.Op Fl p Ar ports
+.Op Fl P Ar pid|process
+.Op Fl U Ar uid|user
+.Op Fl G Ar gid|group
+.Sh DESCRIPTION
+The
+.Nm
+command lists open Internet or
+.Ux
+domain sockets.
+.Pp
+The following options are available:
+.Bl -tag -width Fl
+.It Fl c
+Show connected sockets.
+.It Fl l
+Show listening sockets.
+.It Fl h
+Show a usage summary.
+.It Fl p Ar ports
+Only show Internet sockets if either the local or foreign port number
+is on the specified list.
+The
+.Ar ports
+argument is a comma-separated list of port numbers and ranges
+specified as first and last port separated by a dash.
+.It Fl P Ar pid|process
+Only show sockets of the specified
+.Ar pid|process .
+The
+.Ar pid|process
+argument is a process name or pid.
+.It Fl U Ar uid|user
+Only show sockets of the specified
+.Ar uid|user .
+The
+.Ar uid|user
+argument is a username or uid.
+.It Fl G Ar gid|group
+Only show sockets of the specified
+.Ar gid|group .
+The
+.Ar gid|group
+argument is a groupname or gid.
+.El
+.Pp
+If neither
+.Fl c
+or
+.Fl l
+is specified,
+.Nm
+will list both listening and connected sockets.
+.Pp
+The information listed for each
+socket is:
+.Bl -tag -width "FOREIGN ADDRESS"
+.It Li USER
+The user who owns the socket.
+.It Li COMMAND
+The command which holds the socket.
+.It Li PID
+The process ID of the command which holds the socket.
+.It Li FD
+The file descriptor number of the socket.
+.It Li PROTO
+The transport protocol associated with the socket for Internet
+sockets, or the type of socket (stream or datagram) for
+.Ux
+sockets.
+.It Li LOCAL ADDRESS
+For Internet sockets, this is the address the local end of the socket
+is bound to (see
+.Xr getsockname 2 ) .
+For bound
+.Ux
+sockets, it is the socket's filename.
+For other
+.Ux
+sockets, it is a right arrow followed by the endpoint's filename, or
+.Dq Li ??
+if the endpoint could not be determined.
+.It Li FOREIGN ADDRESS
+(Internet sockets only)
+The address the foreign end of the socket is bound to (see
+.Xr getpeername 2 ) .
+.El
+.Sh SEE ALSO
+.Xr netstat 1 ,
+.Xr protocols 5
+.Sh HISTORY
+The
+.Nm
+command appeared in
+.Fx 3.1 .
+.Sh AUTHORS
+.Pp
+The
+.Nm
+command and this manual page were written by Dag-Erling Sm\(/orgrav <des@FreeBSD.org>.
+.Pp
+The
+.Nm
+command was ported to Linux by William Pitcock <nenolod@nenolod.net>.
