@@ -2,7 +2,7 @@ SRCS = sockstat.c
 OBJS = ${SRCS:.c=.o}
 
 sockstat: ${OBJS}
-	cc -o $@ ${OBJS}
+	$(CC) -o $@ $(LDFLAGS) ${OBJS}
 
 install:
 	install -m 755 -c sockstat ${DESTDIR}/usr/bin

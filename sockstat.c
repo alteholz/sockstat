@@ -41,6 +41,9 @@
 #include <pwd.h>
 #include <grp.h>
 #include <assert.h>
+#include <limits.h>
+
+#define VERSION "0.3.1"
 
 #define SEARCH_ALL     0x00
 #define SEARCH_GID     0x01
@@ -239,16 +242,23 @@ void display_record(procnet_entry_t *record, pid_t pid, const char *pname)
 	char *sbuf, *sbuf2;
 	struct passwd *pwd;
 
-	pwd = getpwuid(record->uid);
-	pwd->pw_name[8] = '\0';
-
 	sbuf = conn_to_string(record->local_addr, record->local_port);
 	sbuf2 = conn_to_string(record->remote_addr, record->remote_port);
 
-	printf("%-8s %-20s %-8u %-6s %-25s %-25s %s\n",
-		pwd->pw_name, pname, pid, protocol_to_string(record->protocol), 
-		sbuf, sbuf2, 
-		states[record->status - 1]);
+	pwd = getpwuid(record->uid);
+	if (pwd == NULL) {
+		/* we have an unknow user, so don't print it */
+		printf("%-8s %-20s %-8u %-6s %-25s %-25s %s\n",
+			"N/A", pname, pid, protocol_to_string(record->protocol),
+			sbuf, sbuf2,
+			states[record->status - 1]);
+	} else {
+		pwd->pw_name[8] = '\0';
+		printf("%-8s %-20s %-8u %-6s %-25s %-25s %s\n",
+			pwd->pw_name, pname, pid, protocol_to_string(record->protocol),
+			sbuf, sbuf2,
+			states[record->status - 1]);
+	}
 
 	free(sbuf);
 	free(sbuf2);
@@ -339,6 +349,12 @@ static void parse_ports(const char *portspec)
 	}
 }
 
+void handle_missing_file(char *filename)
+{
+	fprintf(stderr, "can not open file %s, program will be aborted\n", filename);
+	abort();
+}
+
 int main(int argc, char *argv[])
 {
 	struct passwd *pwd;
@@ -392,13 +408,13 @@ int main(int argc, char *argv[])
 		}
 
 	if ((tcp = fopen("/proc/net/tcp", "r")) == NULL)
-		abort();
+		handle_missing_file("/proc/net/tcp");
 
 	if ((udp = fopen("/proc/net/udp", "r")) == NULL)
-		abort();
+		handle_missing_file("/proc/net/udp");
 
 	if ((raw = fopen("/proc/net/raw", "r")) == NULL)
-		abort();
+		handle_missing_file("/proc/net/raw");
 
 	if ((proc = opendir("/proc")) == NULL)
 		abort();
