@@ -56,15 +56,17 @@
 #define SEARCH_PORTS		0x0040
 #define SEARCH_IPV4_ONLY	0x0080
 #define SEARCH_IPV6_ONLY	0x0100
+#define SEARCH_PROTO		0x0200
 
-#define PROTOCOL_MAX_V6 6
-#define PROTOCOL_TCP6   6
-#define PROTOCOL_UDP6   5
-#define PROTOCOL_RAW6   4
-#define PROTOCOL_MAX_V4 3
-#define PROTOCOL_TCP    3
-#define PROTOCOL_UDP    2
-#define PROTOCOL_RAW    1
+#define PROTOCOL_MAX_V6 	6
+#define PROTOCOL_TCP6   	6
+#define PROTOCOL_UDP6   	5
+#define PROTOCOL_RAW6   	4
+#define PROTOCOL_MAX_V4 	3
+#define PROTOCOL_TCP		3
+#define PROTOCOL_UDP    	2
+#define PROTOCOL_RAW    	1
+#define PROTOCOL_NOTHING	0
 
 #define INT_BIT	    (sizeof(int) * CHAR_BIT)
 #define SET_PORT(p) do { ports[p / INT_BIT] |= 1 << (p % INT_BIT); } while (0)
@@ -91,6 +93,7 @@ const char *states[] = {
 uid_t o_uid;
 gid_t o_gid;
 pid_t o_pid;
+unsigned char o_protocol;
 char buf[1024], o_pname[8];
 DIR *proc, *fd;
 FILE *tcp, *udp, *raw;
@@ -135,7 +138,8 @@ void *xrealloc(void *ptr, size_t sz)
 
 void usage(const char *progname)
 {
-	fprintf(stderr, "usage: %s [-clh] [-p ports] [-U uid|user] [-G gid|group] [-P pid|process]\n", progname);
+	fprintf(stderr, "usage: %s [-46clh] [-p ports] [-U uid|user] [-G gid|group] [-P pid|process] [-R protocol]\n", progname);
+	fprintf(stderr, "       protocol = 'tcp' or 'udp' or 'raw'\n");
 	exit(1);
 }
 
@@ -223,6 +227,15 @@ const char *get_program_name(pid_t pid)
       error:
 	fclose(fp);
 	return "unknown";
+}
+
+const unsigned char string_to_protocol(char *proto)
+{
+	if (strncmp(proto,"udp",3)==0) return PROTOCOL_UDP;
+	if (strncmp(proto,"tcp",3)==0) return PROTOCOL_TCP;
+	if (strncmp(proto,"raw",3)==0) return PROTOCOL_RAW;
+
+	return 0;
 }
 
 const char *protocol_to_string(unsigned int proto)
@@ -462,7 +475,7 @@ int main(int argc, char *argv[])
 	int ch, i;
 	unsigned int total;
 
-	while ((ch = getopt(argc, argv, "46clp:G:U:P:h")) != EOF)
+	while ((ch = getopt(argc, argv, "46clp:G:U:P:hR:")) != EOF)
 		switch (ch)
 		{
 		  case '4':
@@ -474,6 +487,10 @@ int main(int argc, char *argv[])
 		  case 'p':
 			  o_search |= SEARCH_PORTS;
 			  parse_ports(optarg);
+			  break;
+		  case 'R':
+			  o_search |= SEARCH_PROTO;
+			  o_protocol=string_to_protocol(optarg);
 			  break;
 		  case 'c':
 			  o_search |= SEARCH_CONN;
@@ -582,6 +599,24 @@ int main(int argc, char *argv[])
 					continue;
 				}
 
+				if (o_search & SEARCH_PROTO)
+				{
+					if (o_protocol == PROTOCOL_UDP) {
+						if ((ptr->protocol == PROTOCOL_UDP) ||
+						    (ptr->protocol == PROTOCOL_UDP6))
+							display = 1;
+					}
+					if (o_protocol == PROTOCOL_TCP) {
+						if ((ptr->protocol == PROTOCOL_TCP) ||
+						    (ptr->protocol == PROTOCOL_TCP6))
+							display = 1;
+					}
+					if (o_protocol == PROTOCOL_RAW) {
+						if ((ptr->protocol == PROTOCOL_RAW) ||
+						    (ptr->protocol == PROTOCOL_RAW6))
+							display = 1;
+					}
+				}
 				if (o_search & SEARCH_IPV4_ONLY)
 				{
 					if (ptr->protocol<=PROTOCOL_MAX_V4)

@@ -41,6 +41,7 @@
 .Op Fl P Ar pid|process
 .Op Fl U Ar uid|user
 .Op Fl G Ar gid|group
+.Op Fl R Ar protocol
 .Sh DESCRIPTION
 The
 .Nm
@@ -85,6 +86,12 @@ Only show sockets of the specified
 The
 .Ar gid|group
 argument is a groupname or gid.
+.It Fl R Ar protocol
+Only show sockets of the specified
+.Ar protocol .
+The
+.Ar protocol
+argument is either 'raw', 'tcp' or 'udp'
 .El
 .Pp
 If neither
