@@ -57,7 +57,9 @@
 #define SEARCH_IPV4_ONLY	0x0080
 #define SEARCH_IPV6_ONLY	0x0100
 #define SEARCH_PROTO		0x0200
+#define SEARCH_UNIX		0x0400
 
+#define PROTOCOL_UNIX		7
 #define PROTOCOL_MAX_V6 	6
 #define PROTOCOL_TCP6   	6
 #define PROTOCOL_UDP6   	5
@@ -98,6 +100,7 @@ char buf[1024], o_pname[8];
 DIR *proc, *fd;
 FILE *tcp, *udp, *raw;
 FILE *tcp6, *udp6, *raw6;
+FILE *funix;
 procnet_entry_t *netdata;
 unsigned int o_search = SEARCH_ALL;
 
@@ -138,7 +141,7 @@ void *xrealloc(void *ptr, size_t sz)
 
 void usage(const char *progname)
 {
-	fprintf(stderr, "usage: %s [-46clh] [-p ports] [-U uid|user] [-G gid|group] [-P pid|process] [-R protocol]\n", progname);
+	fprintf(stderr, "usage: %s [-46clhu] [-p ports] [-U uid|user] [-G gid|group] [-P pid|process] [-R protocol]\n", progname);
 	fprintf(stderr, "       protocol = 'tcp' or 'udp' or 'raw'\n");
 	exit(1);
 }
@@ -168,7 +171,7 @@ int digittoint(const char i)
 /* lame function to switch between buffers easily. */
 int read_tcp_udp_raw(char *buf, int bufsize)
 {
-	static char fc = PROTOCOL_TCP6;
+	static char fc = PROTOCOL_UNIX;
 	FILE *fileptr;
 
       change:
@@ -191,6 +194,9 @@ int read_tcp_udp_raw(char *buf, int bufsize)
 		  break;
 	  case PROTOCOL_RAW:
 		  fileptr = raw;
+		  break;
+	  case PROTOCOL_UNIX:
+		  fileptr = funix;
 		  break;
 	  case 0:
 		  return 0;
@@ -240,7 +246,7 @@ const unsigned char string_to_protocol(char *proto)
 
 const char *protocol_to_string(unsigned int proto)
 {
-	const char *type[] = { "raw", "udp4", "tcp4", "raw6", "udp6", "tcp6", NULL };
+	const char *type[] = { "raw", "udp4", "tcp4", "raw6", "udp6", "tcp6", "unix", NULL };
 
 	return type[proto - 1];
 }
@@ -343,6 +349,13 @@ unsigned int read_proc_net(void)
 		uid_t uid;
 		ino_t inode;
 		unsigned char status;
+		/* for unix records */
+		int refcount;
+		int proto;
+		int flags;
+		int type;
+		char *path[1024];
+		int count;
 
 		if (i == size)
 		{
@@ -364,8 +377,9 @@ unsigned int read_proc_net(void)
 			netdata[i].status = status;
 			netdata[i++].protocol = protocol;
 		} else {
-			/* we have an V6 entry */
-			if (sscanf(buf, "%*d: %2hhx%2hhx%2hhx%2hhx%2hhx%2hhx%2hhx%2hhx%2hhx%2hhx%2hhx%2hhx%2hhx%2hhx%2hhx%2hhx:%x %2hhx%2hhx%2hhx%2hhx%2hhx%2hhx%2hhx%2hhx%2hhx%2hhx%2hhx%2hhx%2hhx%2hhx%2hhx%2hhx:%x %hx %*X:%*X %*X:%*X %*x %u %*u %u",
+			if ((protocol > PROTOCOL_MAX_V4) && (protocol <= PROTOCOL_MAX_V6)) {
+				/* we have an V6 entry */
+				if (sscanf(buf, "%*d: %2hhx%2hhx%2hhx%2hhx%2hhx%2hhx%2hhx%2hhx%2hhx%2hhx%2hhx%2hhx%2hhx%2hhx%2hhx%2hhx:%x %2hhx%2hhx%2hhx%2hhx%2hhx%2hhx%2hhx%2hhx%2hhx%2hhx%2hhx%2hhx%2hhx%2hhx%2hhx%2hhx:%x %hx %*X:%*X %*X:%*X %*x %u %*u %u",
 				   &netdata[i].local6_addr.s6_addr[ 3],
 				   &netdata[i].local6_addr.s6_addr[ 2],
 				   &netdata[i].local6_addr.s6_addr[ 1],
@@ -401,13 +415,29 @@ unsigned int read_proc_net(void)
 				   &netdata[i].remote6_addr.s6_addr[12],
 				   &rport, &status, 
 				   &uid, &inode) != 37)
-				continue;
-			netdata[i].local_port = lport;
-			netdata[i].remote_port = rport;
-			netdata[i].uid = uid;
-			netdata[i].inode = inode;
-			netdata[i].status = status;
-			netdata[i++].protocol = protocol;
+					continue;
+				netdata[i].local_port = lport;
+				netdata[i].remote_port = rport;
+				netdata[i].uid = uid;
+				netdata[i].inode = inode;
+				netdata[i].status = status;
+				netdata[i++].protocol = protocol;
+			} else {
+				/* we have an unix entry */
+				count=sscanf(buf, "%*x: %u %u %u %u %u %u %s",
+					&refcount,
+					&proto,
+					&flags,
+					&type,
+					&status,
+					&inode,
+					&path);
+				if ((count!=6) && (count!=7)) continue;
+				continue; //XXX need some work
+				netdata[i].inode = inode;
+				netdata[i].status = status;
+				netdata[i++].protocol = protocol;
+			}
 		}	
 	}
 
@@ -475,7 +505,7 @@ int main(int argc, char *argv[])
 	int ch, i;
 	unsigned int total;
 
-	while ((ch = getopt(argc, argv, "46clp:G:U:P:hR:")) != EOF)
+	while ((ch = getopt(argc, argv, "46clp:G:U:P:hR:u")) != EOF)
 		switch (ch)
 		{
 		  case '4':
@@ -483,6 +513,9 @@ int main(int argc, char *argv[])
 			  break;
 		  case '6':
 			  o_search |= SEARCH_IPV6_ONLY;
+			  break;
+		  case 'u':
+			  o_search |= SEARCH_UNIX;
 			  break;
 		  case 'p':
 			  o_search |= SEARCH_PORTS;
@@ -547,6 +580,9 @@ int main(int argc, char *argv[])
 	if ((raw6 = fopen("/proc/net/raw6", "r")) == NULL)
 		handle_missing_file("/proc/net/raw6");
 
+	if ((funix = fopen("/proc/net/unix", "r")) == NULL)
+		handle_missing_file("/proc/net/unix");
+
 	if ((proc = opendir("/proc")) == NULL)
 		abort();
 
@@ -558,6 +594,7 @@ int main(int argc, char *argv[])
 	fclose(tcp6);
 	fclose(udp6);
 	fclose(raw6);
+	fclose(funix);
 
 	printf("%-8s %-20s %-8s %-6s %-25s %-25s %s\n", "USER", "PROCESS", "PID", "PROTO", "SOURCE ADDRESS", "FOREIGN ADDRESS", "STATE");
 
