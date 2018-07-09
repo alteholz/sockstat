@@ -1,5 +1,6 @@
 .\"-
 .\" Copyright (c) 1999 Dag-Erling Coïdan Smørgrav
+.\" Copyright (c) 2018 Thorsten Alteholz
 .\" All rights reserved.
 .\"
 .\" Redistribution and use in source and binary forms, with or without
@@ -35,7 +36,7 @@
 .Nd list open sockets
 .Sh SYNOPSIS
 .Nm
-.Op Fl clh
+.Op Fl 46clh
 .Op Fl p Ar ports
 .Op Fl P Ar pid|process
 .Op Fl U Ar uid|user
@@ -49,6 +50,10 @@ domain sockets.
 .Pp
 The following options are available:
 .Bl -tag -width Fl
+.It Fl 4
+Show IPv4 sockets only.
+.It Fl 6
+Show IPv6 sockets only.
 .It Fl c
 Show connected sockets.
 .It Fl l

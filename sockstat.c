@@ -42,18 +42,26 @@
 #include <grp.h>
 #include <assert.h>
 #include <limits.h>
+#include <err.h>
 
-#define VERSION "0.3.1"
+#define VERSION "0.4.0"
 
-#define SEARCH_ALL     0x00
-#define SEARCH_GID     0x01
-#define SEARCH_PID     0x02
-#define SEARCH_PNAME   0x04
-#define SEARCH_UID     0x08
-#define SEARCH_LISTEN  0x10
-#define SEARCH_CONN    0x20
-#define SEARCH_PORTS   0x40
+#define SEARCH_ALL		0x0000
+#define SEARCH_GID		0x0001
+#define SEARCH_PID		0x0002
+#define SEARCH_PNAME		0x0004
+#define SEARCH_UID		0x0008
+#define SEARCH_LISTEN		0x0010
+#define SEARCH_CONN		0x0020
+#define SEARCH_PORTS		0x0040
+#define SEARCH_IPV4_ONLY	0x0080
+#define SEARCH_IPV6_ONLY	0x0100
 
+#define PROTOCOL_MAX_V6 6
+#define PROTOCOL_TCP6   6
+#define PROTOCOL_UDP6   5
+#define PROTOCOL_RAW6   4
+#define PROTOCOL_MAX_V4 3
 #define PROTOCOL_TCP    3
 #define PROTOCOL_UDP    2
 #define PROTOCOL_RAW    1
@@ -67,6 +75,8 @@ typedef struct {
 	int fd;
 	struct in_addr local_addr;
 	struct in_addr remote_addr;
+	struct in6_addr local6_addr;
+	struct in6_addr remote6_addr;
 	unsigned int local_port;
 	unsigned int remote_port;
 	unsigned char status, protocol;
@@ -84,6 +94,7 @@ pid_t o_pid;
 char buf[1024], o_pname[8];
 DIR *proc, *fd;
 FILE *tcp, *udp, *raw;
+FILE *tcp6, *udp6, *raw6;
 procnet_entry_t *netdata;
 unsigned int o_search = SEARCH_ALL;
 
@@ -153,12 +164,21 @@ int digittoint(const char i)
 /* lame function to switch between buffers easily. */
 int read_tcp_udp_raw(char *buf, int bufsize)
 {
-	static char fc = PROTOCOL_TCP;
+	static char fc = PROTOCOL_TCP6;
 	FILE *fileptr;
 
       change:
 	switch (fc)
 	{
+	  case PROTOCOL_TCP6:
+		  fileptr = tcp6;
+		  break;
+	  case PROTOCOL_UDP6:
+		  fileptr = udp6;
+		  break;
+	  case PROTOCOL_RAW6:
+		  fileptr = raw6;
+		  break;
 	  case PROTOCOL_TCP:
 		  fileptr = tcp;
 		  break;
@@ -207,9 +227,18 @@ const char *get_program_name(pid_t pid)
 
 const char *protocol_to_string(unsigned int proto)
 {
-	const char *type[] = { "raw", "udp4", "tcp4", NULL };
+	const char *type[] = { "raw", "udp4", "tcp4", "raw6", "udp6", "tcp6", NULL };
 
 	return type[proto - 1];
+}
+
+const char *conn6_addr(struct in6_addr addr)
+{
+	char buf[1024];
+
+        inet_ntop( AF_INET6, &addr, buf, 1024);
+
+	return strdup(buf);
 }
 
 const char *conn_addr(struct in_addr addr)
@@ -218,6 +247,23 @@ const char *conn_addr(struct in_addr addr)
 		return "*";
 
 	return inet_ntoa(addr);
+}
+
+char *conn6_to_string(struct in6_addr addr, unsigned int port)
+{
+	char buf[1024];
+	int i = 0;
+
+	i += snprintf(buf, sizeof(buf), "%s:", conn6_addr(addr));
+	if (port != 0)
+		snprintf(buf + i, sizeof(buf) - i, "%u", port);
+	else
+	{
+		buf[i] = '*';
+		buf[i + 1] = '\0';
+	}
+
+	return strdup(buf);
 }
 
 char *conn_to_string(struct in_addr addr, unsigned int port)
@@ -242,8 +288,13 @@ void display_record(procnet_entry_t *record, pid_t pid, const char *pname)
 	char *sbuf, *sbuf2;
 	struct passwd *pwd;
 
-	sbuf = conn_to_string(record->local_addr, record->local_port);
-	sbuf2 = conn_to_string(record->remote_addr, record->remote_port);
+	if (record->protocol<=PROTOCOL_MAX_V4) {
+		sbuf = conn_to_string(record->local_addr, record->local_port);
+		sbuf2 = conn_to_string(record->remote_addr, record->remote_port);
+	} else {
+		sbuf = conn6_to_string(record->local6_addr, record->local_port);
+		sbuf2 = conn6_to_string(record->remote6_addr, record->remote_port);
+	}
 
 	pwd = getpwuid(record->uid);
 	if (pwd == NULL) {
@@ -286,21 +337,69 @@ unsigned int read_proc_net(void)
 			netdata = xrealloc(netdata, (sizeof(procnet_entry_t) * size));
 		}
 
-		if (sscanf(buf, "%*d: %lX:%x %lX:%x %hx %*X:%*X %*X:%*X %*x %u %*u %u",
-			   (u_long *) &netdata[i].local_addr, &lport,
-			   (u_long *) &netdata[i].remote_addr, &rport, &status, 
-			   &uid, &inode) != 7)
-			continue;
-
-		netdata[i].local_port = lport;
-		netdata[i].remote_port = rport;
-		netdata[i].uid = uid;
-		netdata[i].inode = inode;
-		netdata[i].status = status;
-		netdata[i++].protocol = protocol;
+		if (protocol <= PROTOCOL_MAX_V4) {
+			/* we have an V4 entry */
+			if (sscanf(buf, "%*d: %lX:%x %lX:%x %hx %*X:%*X %*X:%*X %*x %u %*u %u",
+				   (u_long *) &netdata[i].local_addr, &lport,
+				   (u_long *) &netdata[i].remote_addr, &rport, &status, 
+				   &uid, &inode) != 7)
+				continue;
+			netdata[i].local_port = lport;
+			netdata[i].remote_port = rport;
+			netdata[i].uid = uid;
+			netdata[i].inode = inode;
+			netdata[i].status = status;
+			netdata[i++].protocol = protocol;
+		} else {
+			/* we have an V6 entry */
+			if (sscanf(buf, "%*d: %2hhx%2hhx%2hhx%2hhx%2hhx%2hhx%2hhx%2hhx%2hhx%2hhx%2hhx%2hhx%2hhx%2hhx%2hhx%2hhx:%x %2hhx%2hhx%2hhx%2hhx%2hhx%2hhx%2hhx%2hhx%2hhx%2hhx%2hhx%2hhx%2hhx%2hhx%2hhx%2hhx:%x %hx %*X:%*X %*X:%*X %*x %u %*u %u",
+				   &netdata[i].local6_addr.s6_addr[ 3],
+				   &netdata[i].local6_addr.s6_addr[ 2],
+				   &netdata[i].local6_addr.s6_addr[ 1],
+				   &netdata[i].local6_addr.s6_addr[ 0],
+				   &netdata[i].local6_addr.s6_addr[ 7],
+				   &netdata[i].local6_addr.s6_addr[ 6],
+				   &netdata[i].local6_addr.s6_addr[ 5],
+				   &netdata[i].local6_addr.s6_addr[ 4],
+				   &netdata[i].local6_addr.s6_addr[11],
+				   &netdata[i].local6_addr.s6_addr[10],
+				   &netdata[i].local6_addr.s6_addr[ 9],
+				   &netdata[i].local6_addr.s6_addr[ 8],
+				   &netdata[i].local6_addr.s6_addr[15],
+				   &netdata[i].local6_addr.s6_addr[14],
+				   &netdata[i].local6_addr.s6_addr[13],
+				   &netdata[i].local6_addr.s6_addr[12],
+				   &lport,
+				   &netdata[i].remote6_addr.s6_addr[ 3],
+				   &netdata[i].remote6_addr.s6_addr[ 2],
+				   &netdata[i].remote6_addr.s6_addr[ 1],
+				   &netdata[i].remote6_addr.s6_addr[ 0],
+				   &netdata[i].remote6_addr.s6_addr[ 7],
+				   &netdata[i].remote6_addr.s6_addr[ 6],
+				   &netdata[i].remote6_addr.s6_addr[ 5],
+				   &netdata[i].remote6_addr.s6_addr[ 4],
+				   &netdata[i].remote6_addr.s6_addr[11],
+				   &netdata[i].remote6_addr.s6_addr[10],
+				   &netdata[i].remote6_addr.s6_addr[ 9],
+				   &netdata[i].remote6_addr.s6_addr[ 8],
+				   &netdata[i].remote6_addr.s6_addr[15],
+				   &netdata[i].remote6_addr.s6_addr[14],
+				   &netdata[i].remote6_addr.s6_addr[13],
+				   &netdata[i].remote6_addr.s6_addr[12],
+				   &rport, &status, 
+				   &uid, &inode) != 37)
+				continue;
+			netdata[i].local_port = lport;
+			netdata[i].remote_port = rport;
+			netdata[i].uid = uid;
+			netdata[i].inode = inode;
+			netdata[i].status = status;
+			netdata[i++].protocol = protocol;
+		}	
 	}
 
 	total = i;
+
 	qsort(netdata, total, sizeof(procnet_entry_t), compare);
 
 	return total;
@@ -363,9 +462,15 @@ int main(int argc, char *argv[])
 	int ch, i;
 	unsigned int total;
 
-	while ((ch = getopt(argc, argv, "clp:G:U:P:h")) != EOF)
+	while ((ch = getopt(argc, argv, "46clp:G:U:P:h")) != EOF)
 		switch (ch)
 		{
+		  case '4':
+			  o_search |= SEARCH_IPV4_ONLY;
+			  break;
+		  case '6':
+			  o_search |= SEARCH_IPV6_ONLY;
+			  break;
 		  case 'p':
 			  o_search |= SEARCH_PORTS;
 			  parse_ports(optarg);
@@ -416,6 +521,15 @@ int main(int argc, char *argv[])
 	if ((raw = fopen("/proc/net/raw", "r")) == NULL)
 		handle_missing_file("/proc/net/raw");
 
+	if ((tcp6 = fopen("/proc/net/tcp6", "r")) == NULL)
+		handle_missing_file("/proc/net/tcp6");
+
+	if ((udp6 = fopen("/proc/net/udp6", "r")) == NULL)
+		handle_missing_file("/proc/net/udp6");
+
+	if ((raw6 = fopen("/proc/net/raw6", "r")) == NULL)
+		handle_missing_file("/proc/net/raw6");
+
 	if ((proc = opendir("/proc")) == NULL)
 		abort();
 
@@ -424,6 +538,9 @@ int main(int argc, char *argv[])
 	fclose(tcp);
 	fclose(udp);
 	fclose(raw);
+	fclose(tcp6);
+	fclose(udp6);
+	fclose(raw6);
 
 	printf("%-8s %-20s %-8s %-6s %-25s %-25s %s\n", "USER", "PROCESS", "PID", "PROTO", "SOURCE ADDRESS", "FOREIGN ADDRESS", "STATE");
 
@@ -456,6 +573,7 @@ int main(int argc, char *argv[])
 				int display = 0;
 				pid_t pid = atoi(procent->d_name);
 
+
 				pn = get_program_name(pid);
 
 				if (o_search == 0)
@@ -464,6 +582,17 @@ int main(int argc, char *argv[])
 					continue;
 				}
 
+				if (o_search & SEARCH_IPV4_ONLY)
+				{
+					if (ptr->protocol<=PROTOCOL_MAX_V4)
+						display = 1;
+				}
+				if (o_search & SEARCH_IPV6_ONLY)
+				{
+					if ((ptr->protocol<=PROTOCOL_MAX_V6)
+					 && (ptr->protocol>PROTOCOL_MAX_V4))
+						display = 1;
+				}
 				if (o_search & SEARCH_PID)
 				{
 					if (o_pid == atoi(procent->d_name))
