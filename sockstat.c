@@ -1,6 +1,7 @@
 /*-
  * Copyright (c) 2002 Dag-Erling Coïdan Smørgrav
  * Copyright (c) 2008 William Pitcock
+ * Copyright (c) 2018 Thorsten Alteholz
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -77,6 +78,8 @@
 typedef struct {
 	ino_t inode;
 	int fd;
+	int refcount, proto, flags, type;
+	char path[1024];
 	struct in_addr local_addr;
 	struct in_addr remote_addr;
 	struct in6_addr local6_addr;
@@ -142,7 +145,7 @@ void *xrealloc(void *ptr, size_t sz)
 void usage(const char *progname)
 {
 	fprintf(stderr, "usage: %s [-46clhu] [-p ports] [-U uid|user] [-G gid|group] [-P pid|process] [-R protocol]\n", progname);
-	fprintf(stderr, "       protocol = 'tcp' or 'udp' or 'raw'\n");
+	fprintf(stderr, "       protocol = 'tcp' or 'udp' or 'raw' or 'unix'\n");
 	exit(1);
 }
 
@@ -169,11 +172,12 @@ int digittoint(const char i)
 }
 
 /* lame function to switch between buffers easily. */
-int read_tcp_udp_raw(char *buf, int bufsize)
+int read_tcp_udp_raw(char *buf, int bufsize, char initialFileToRead)
 {
-	static char fc = PROTOCOL_UNIX;
+	static char fc = PROTOCOL_NOTHING;
 	FILE *fileptr;
 
+	if (fc==PROTOCOL_NOTHING) fc=initialFileToRead;
       change:
 	switch (fc)
 	{
@@ -240,6 +244,7 @@ const unsigned char string_to_protocol(char *proto)
 	if (strncmp(proto,"udp",3)==0) return PROTOCOL_UDP;
 	if (strncmp(proto,"tcp",3)==0) return PROTOCOL_TCP;
 	if (strncmp(proto,"raw",3)==0) return PROTOCOL_RAW;
+	if (strncmp(proto,"unix",4)==0) return PROTOCOL_UNIX;
 
 	return 0;
 }
@@ -306,13 +311,23 @@ void display_record(procnet_entry_t *record, pid_t pid, const char *pname)
 {
 	char *sbuf, *sbuf2;
 	struct passwd *pwd;
+	int printStatus=1;
 
 	if (record->protocol<=PROTOCOL_MAX_V4) {
+		/* we have a IPv4 record */
 		sbuf = conn_to_string(record->local_addr, record->local_port);
 		sbuf2 = conn_to_string(record->remote_addr, record->remote_port);
 	} else {
-		sbuf = conn6_to_string(record->local6_addr, record->local_port);
-		sbuf2 = conn6_to_string(record->remote6_addr, record->remote_port);
+		if ((record->protocol<=PROTOCOL_MAX_V6) && (record->protocol>PROTOCOL_MAX_V4)) {
+			/* we have a IPv6 record */
+			sbuf = conn6_to_string(record->local6_addr, record->local_port);
+			sbuf2 = conn6_to_string(record->remote6_addr, record->remote_port);
+		} else {
+			/* we have a unix record */
+			sbuf = strdup(record->path);
+			sbuf2= strdup(" ");
+			printStatus=0;
+		}
 	}
 
 	pwd = getpwuid(record->uid);
@@ -321,20 +336,20 @@ void display_record(procnet_entry_t *record, pid_t pid, const char *pname)
 		printf("%-8s %-20s %-8u %-6s %-25s %-25s %s\n",
 			"N/A", pname, pid, protocol_to_string(record->protocol),
 			sbuf, sbuf2,
-			states[record->status - 1]);
+			(printStatus==1)?states[record->status - 1]:" ");
 	} else {
 		pwd->pw_name[8] = '\0';
 		printf("%-8s %-20s %-8u %-6s %-25s %-25s %s\n",
 			pwd->pw_name, pname, pid, protocol_to_string(record->protocol),
 			sbuf, sbuf2,
-			states[record->status - 1]);
+			(printStatus==1)?states[record->status - 1]:" ");
 	}
 
 	free(sbuf);
 	free(sbuf2);
 }
 
-unsigned int read_proc_net(void)
+unsigned int read_proc_net(char initialFileToRead)
 {
 	int d;
 	unsigned int i = 0, size = 256, total;
@@ -342,7 +357,7 @@ unsigned int read_proc_net(void)
 
 	netdata = xcalloc(sizeof(procnet_entry_t), size);
 
-	while ((protocol = read_tcp_udp_raw(buf, sizeof(buf))) != 0)
+	while ((protocol = read_tcp_udp_raw(buf, sizeof(buf), initialFileToRead)) != 0)
 	{
 		char *q, *x, *y;
 		int lport, rport;
@@ -433,7 +448,11 @@ unsigned int read_proc_net(void)
 					&inode,
 					&path);
 				if ((count!=6) && (count!=7)) continue;
-				continue; //XXX need some work
+				snprintf(netdata[i].path,1024,"%s",path);
+				netdata[i].refcount=refcount;
+				netdata[i].proto=proto;
+				netdata[i].flags=flags;
+				netdata[i].type=type;
 				netdata[i].inode = inode;
 				netdata[i].status = status;
 				netdata[i++].protocol = protocol;
@@ -503,6 +522,7 @@ int main(int argc, char *argv[])
 	struct group *grp;
 	struct dirent *procent, *fdent;
 	int ch, i;
+	char initialFileToRead=PROTOCOL_MAX_V6;
 	unsigned int total;
 
 	while ((ch = getopt(argc, argv, "46clp:G:U:P:hR:u")) != EOF)
@@ -515,7 +535,7 @@ int main(int argc, char *argv[])
 			  o_search |= SEARCH_IPV6_ONLY;
 			  break;
 		  case 'u':
-			  o_search |= SEARCH_UNIX;
+			  initialFileToRead=PROTOCOL_UNIX;
 			  break;
 		  case 'p':
 			  o_search |= SEARCH_PORTS;
@@ -580,21 +600,30 @@ int main(int argc, char *argv[])
 	if ((raw6 = fopen("/proc/net/raw6", "r")) == NULL)
 		handle_missing_file("/proc/net/raw6");
 
-	if ((funix = fopen("/proc/net/unix", "r")) == NULL)
-		handle_missing_file("/proc/net/unix");
+	if ((funix = fopen("/proc/net/unix", "r")) == NULL) {
+		/* 
+		 * independent of -u, we need do avoid PROTOCOL_UNIX if this file 
+		 * is not available
+		 */
+		initialFileToRead=PROTOCOL_MAX_V6;
+	}
 
 	if ((proc = opendir("/proc")) == NULL)
 		abort();
 
-	total = read_proc_net();
+	total = read_proc_net(initialFileToRead);
 
+	/*
+	 * program has been abort()ed if file not available
+	 * except funix
+	 */
 	fclose(tcp);
 	fclose(udp);
 	fclose(raw);
 	fclose(tcp6);
 	fclose(udp6);
 	fclose(raw6);
-	fclose(funix);
+	if (funix) fclose(funix);
 
 	printf("%-8s %-20s %-8s %-6s %-25s %-25s %s\n", "USER", "PROCESS", "PID", "PROTO", "SOURCE ADDRESS", "FOREIGN ADDRESS", "STATE");
 
@@ -651,6 +680,10 @@ int main(int argc, char *argv[])
 					if (o_protocol == PROTOCOL_RAW) {
 						if ((ptr->protocol == PROTOCOL_RAW) ||
 						    (ptr->protocol == PROTOCOL_RAW6))
+							display = 1;
+					}
+					if (o_protocol == PROTOCOL_UNIX) {
+						if (ptr->protocol == PROTOCOL_UNIX)
 							display = 1;
 					}
 				}

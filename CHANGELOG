@@ -1,6 +1,7 @@
 0.4.0
 	IPv6 support
 	add -R option to limit shown sockets to given protocol
+	add unix sockets with option -u
 
 
 0.3.1

@@ -36,7 +36,7 @@
 .Nd list open sockets
 .Sh SYNOPSIS
 .Nm
-.Op Fl 46clh
+.Op Fl 46clhu
 .Op Fl p Ar ports
 .Op Fl P Ar pid|process
 .Op Fl U Ar uid|user
@@ -55,6 +55,8 @@ The following options are available:
 Show IPv4 sockets only.
 .It Fl 6
 Show IPv6 sockets only.
+.It Fl u
+Also show unix sockets.
 .It Fl c
 Show connected sockets.
 .It Fl l
@@ -91,7 +93,7 @@ Only show sockets of the specified
 .Ar protocol .
 The
 .Ar protocol
-argument is either 'raw', 'tcp' or 'udp'
+argument is either 'raw', 'tcp', 'udp' or 'unix'
 .El
 .Pp
 If neither
