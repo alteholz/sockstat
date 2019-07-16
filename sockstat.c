@@ -356,14 +356,13 @@ unsigned int read_proc_net(char initialFileToRead)
 	char protocol;
 
 	netdata = xcalloc(sizeof(procnet_entry_t), size);
-
 	while ((protocol = read_tcp_udp_raw(buf, sizeof(buf), initialFileToRead)) != 0)
 	{
 		char *q, *x, *y;
 		int lport, rport;
 		uid_t uid;
 		ino_t inode;
-		unsigned char status;
+		unsigned short status;
 		/* for unix records */
 		int refcount;
 		int proto;
@@ -377,10 +376,9 @@ unsigned int read_proc_net(char initialFileToRead)
 			size *= 2;
 			netdata = xrealloc(netdata, (sizeof(procnet_entry_t) * size));
 		}
-
 		if (protocol <= PROTOCOL_MAX_V4) {
 			/* we have an V4 entry */
-			if (sscanf(buf, "%*d: %lX:%x %lX:%x %hx %*X:%*X %*X:%*X %*x %u %*u %u",
+			if (sscanf(buf, "%*d: %lX:%x %lX:%x %hx %*X:%*X %*X:%*X %*x %u %*u %lu",
 				   (u_long *) &netdata[i].local_addr, &lport,
 				   (u_long *) &netdata[i].remote_addr, &rport, &status, 
 				   &uid, &inode) != 7)
@@ -394,7 +392,7 @@ unsigned int read_proc_net(char initialFileToRead)
 		} else {
 			if ((protocol > PROTOCOL_MAX_V4) && (protocol <= PROTOCOL_MAX_V6)) {
 				/* we have an V6 entry */
-				if (sscanf(buf, "%*d: %2hhx%2hhx%2hhx%2hhx%2hhx%2hhx%2hhx%2hhx%2hhx%2hhx%2hhx%2hhx%2hhx%2hhx%2hhx%2hhx:%x %2hhx%2hhx%2hhx%2hhx%2hhx%2hhx%2hhx%2hhx%2hhx%2hhx%2hhx%2hhx%2hhx%2hhx%2hhx%2hhx:%x %hx %*X:%*X %*X:%*X %*x %u %*u %u",
+				if (sscanf(buf, "%*d: %2hhx%2hhx%2hhx%2hhx%2hhx%2hhx%2hhx%2hhx%2hhx%2hhx%2hhx%2hhx%2hhx%2hhx%2hhx%2hhx:%x %2hhx%2hhx%2hhx%2hhx%2hhx%2hhx%2hhx%2hhx%2hhx%2hhx%2hhx%2hhx%2hhx%2hhx%2hhx%2hhx:%x %hx %*X:%*X %*X:%*X %*x %u %*u %lu",
 				   &netdata[i].local6_addr.s6_addr[ 3],
 				   &netdata[i].local6_addr.s6_addr[ 2],
 				   &netdata[i].local6_addr.s6_addr[ 1],
@@ -439,16 +437,16 @@ unsigned int read_proc_net(char initialFileToRead)
 				netdata[i++].protocol = protocol;
 			} else {
 				/* we have an unix entry */
-				count=sscanf(buf, "%*x: %u %u %u %u %u %u %s",
+				count=sscanf(buf, "%*x: %u %u %u %u %hx %lu %s",
 					&refcount,
 					&proto,
 					&flags,
 					&type,
 					&status,
 					&inode,
-					&path);
+					(char*)&path);
 				if ((count!=6) && (count!=7)) continue;
-				snprintf(netdata[i].path,1024,"%s",path);
+				snprintf(netdata[i].path,1024,"%s",(char*)path);
 				netdata[i].refcount=refcount;
 				netdata[i].proto=proto;
 				netdata[i].flags=flags;
