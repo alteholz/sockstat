@@ -1,7 +1,7 @@
 /*-
  * Copyright (c) 2002 Dag-Erling Coïdan Smørgrav
  * Copyright (c) 2008 William Pitcock
- * Copyright (c) 2018 Thorsten Alteholz
+ * Copyright (c) 2018-2023 Thorsten Alteholz
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -45,7 +45,7 @@
 #include <limits.h>
 #include <err.h>
 
-#define VERSION "0.4.0"
+#define VERSION "0.4.1"
 
 #define SEARCH_ALL		0x0000
 #define SEARCH_GID		0x0001
@@ -106,6 +106,7 @@ FILE *tcp6, *udp6, *raw6;
 FILE *funix;
 procnet_entry_t *netdata;
 unsigned int o_search = SEARCH_ALL;
+int o_old_behaviour = 0;
 
 static int *ports;
 
@@ -144,7 +145,7 @@ void *xrealloc(void *ptr, size_t sz)
 
 void usage(const char *progname)
 {
-	fprintf(stderr, "usage: %s [-46clhu] [-p ports] [-U uid|user] [-G gid|group] [-P pid|process] [-R protocol]\n", progname);
+	fprintf(stderr, "usage: %s [-46clhu] [-p ports] [-U uid|user] [-G gid|group] [-P pid|process] [-R protocol] [-o]\n", progname);
 	fprintf(stderr, "       protocol = 'tcp' or 'udp' or 'raw' or 'unix'\n");
 	exit(1);
 }
@@ -523,7 +524,7 @@ int main(int argc, char *argv[])
 	char initialFileToRead=PROTOCOL_MAX_V6;
 	unsigned int total;
 
-	while ((ch = getopt(argc, argv, "46clp:G:U:P:hR:u")) != EOF)
+	while ((ch = getopt(argc, argv, "46clp:G:U:P:hR:uo")) != EOF)
 		switch (ch)
 		{
 		  case '4':
@@ -574,6 +575,9 @@ int main(int argc, char *argv[])
 				  o_uid = atoi(optarg);
 			  else
 				  o_uid = pwd->pw_uid;
+			  break;
+		  case 'o':	/* old behaviour by combining all search parameter with | */
+			  o_old_behaviour = 1;
 			  break;
 		  case 'h':
 		  default:
@@ -651,9 +655,8 @@ int main(int argc, char *argv[])
 
 			if ((ptr = bsearch(&st.st_ino, netdata, total, sizeof(procnet_entry_t), compare)) != NULL)
 			{
-				int display = 0;
+				int display = o_old_behaviour==1?0:1;
 				pid_t pid = atoi(procent->d_name);
-
 
 				pn = get_program_name(pid);
 
@@ -668,71 +671,97 @@ int main(int argc, char *argv[])
 					if (o_protocol == PROTOCOL_UDP) {
 						if ((ptr->protocol == PROTOCOL_UDP) ||
 						    (ptr->protocol == PROTOCOL_UDP6))
-							display = 1;
+							display = o_old_behaviour==1? display | 1:display & 1;
+                                                else display &= (0 | o_old_behaviour);
 					}
 					if (o_protocol == PROTOCOL_TCP) {
 						if ((ptr->protocol == PROTOCOL_TCP) ||
 						    (ptr->protocol == PROTOCOL_TCP6))
-							display = 1;
+							display = o_old_behaviour==1? display | 1:display & 1;
+                                                else display &= (0 | o_old_behaviour);
 					}
 					if (o_protocol == PROTOCOL_RAW) {
 						if ((ptr->protocol == PROTOCOL_RAW) ||
 						    (ptr->protocol == PROTOCOL_RAW6))
-							display = 1;
+							display = o_old_behaviour==1? display | 1:display & 1;
+                                                else display &= (0 | o_old_behaviour);
 					}
 					if (o_protocol == PROTOCOL_UNIX) {
 						if (ptr->protocol == PROTOCOL_UNIX)
-							display = 1;
+							display = o_old_behaviour==1? display | 1:display & 1;
+                                                else display &= (0 | o_old_behaviour);
 					}
 				}
 				if (o_search & SEARCH_IPV4_ONLY)
 				{
 					if (ptr->protocol<=PROTOCOL_MAX_V4)
-						display = 1;
+						display = o_old_behaviour==1? display | 1:display & 1;
+                                        else display &= (0 | o_old_behaviour);
 				}
 				if (o_search & SEARCH_IPV6_ONLY)
 				{
 					if ((ptr->protocol<=PROTOCOL_MAX_V6)
 					 && (ptr->protocol>PROTOCOL_MAX_V4))
-						display = 1;
+						display = o_old_behaviour==1? display | 1:display & 1;
+                                        else display &= (0 | o_old_behaviour);
 				}
 				if (o_search & SEARCH_PID)
 				{
 					if (o_pid == atoi(procent->d_name))
-						display = 1;
+						display = o_old_behaviour==1? display | 1:display & 1;
+                                        else display &= (0 | o_old_behaviour);
 				}
 				if (o_search & SEARCH_PNAME)
 				{
 				 	if (!strncasecmp(pn, o_pname, strlen(o_pname)))
-						display = 1;
+						display = o_old_behaviour==1? display | 1:display & 1;
+                                        else display &= (0 | o_old_behaviour);
 				}
 				if (o_search & SEARCH_GID)
 				{
 					grp = getgrgid(o_gid);
 					while ((pwd = getpwnam(*((grp->gr_mem)++))) != NULL)
 						if (pwd->pw_uid == ptr->uid)
-							display = 1;
+							display = o_old_behaviour==1? display | 1:display & 1;
+                                                else display &= (0 | o_old_behaviour);
 				}
 				if (o_search & SEARCH_UID)
 				{
 					if (o_uid == ptr->uid)
-						display = 1;
-				}
-				if (o_search & SEARCH_LISTEN)
-				{
-					if (ptr->status == 10)
-						display = 1;
-				}
-				if (o_search & SEARCH_CONN)
-				{
-					if (ptr->status == 1)
-						display = 1;
+						display = o_old_behaviour==1? display | 1:display & 1;
+                                        else display &= (0 | o_old_behaviour);
 				}
 				if (o_search & SEARCH_PORTS)
 				{
 					if (CHK_PORT(ptr->local_port) || CHK_PORT(ptr->remote_port))
-						display = 1;
+						display = o_old_behaviour==1? display | 1:display & 1;
+                                        else display &= (0 | o_old_behaviour);
 				}
+
+				if (display)
+ 				{
+				  /* this is only needed if we want to display anything */
+				  int display_status = o_old_behaviour;
+				  int consider_display_status = 0;
+
+				  if (o_search & SEARCH_LISTEN)
+				  {
+				  	consider_display_status = 1;
+					if (ptr->status == 10)
+						display_status = 1;
+				  }
+				  if (o_search & SEARCH_CONN)
+				  {
+				  	consider_display_status = 1;
+					if (ptr->status == 1)
+						display_status = 1;
+				  }
+
+				  if (consider_display_status == 1)
+				  {
+					display &= display_status;
+				  }
+ 				}
 
 				if (display)
 					display_record(ptr, pid, pn);

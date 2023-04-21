@@ -1,3 +1,9 @@
+0.4.1
+	adapt behaviour to explanation in manpage
+        (all search options are combined by & now and no longer |)
+        add -o option to keep old behaviour
+        -> fixes Debian bug #1034626
+
 0.4.0
 	IPv6 support
 	add -R option to limit shown sockets to given protocol
