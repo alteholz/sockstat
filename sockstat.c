@@ -101,8 +101,8 @@ pid_t o_pid;
 unsigned char o_protocol;
 char buf[1024], o_pname[8];
 DIR *proc, *fd;
-FILE *tcp, *udp, *raw;
-FILE *tcp6, *udp6, *raw6;
+FILE *tcp=NULL, *udp=NULL, *raw=NULL;
+FILE *tcp6=NULL, *udp6=NULL, *raw6=NULL;
 FILE *funix;
 procnet_entry_t *netdata;
 unsigned int o_search = SEARCH_ALL;
@@ -209,8 +209,10 @@ int read_tcp_udp_raw(char *buf, int bufsize, char initialFileToRead)
 		  break;
 	}
 
-	if (fgets(buf, bufsize, fileptr) != NULL)
-		return fc;
+	if (fileptr!=NULL) {
+		if (fgets(buf, bufsize, fileptr) != NULL)
+			return fc;
+	}
 
 	--fc;
 	goto change;
@@ -584,23 +586,27 @@ int main(int argc, char *argv[])
 			  usage(argv[0]);
 		}
 
-	if ((tcp = fopen("/proc/net/tcp", "r")) == NULL)
-		handle_missing_file("/proc/net/tcp");
+	if (!(o_search & SEARCH_IPV6_ONLY)) {
+		if ((tcp = fopen("/proc/net/tcp", "r")) == NULL)
+			handle_missing_file("/proc/net/tcp");
 
-	if ((udp = fopen("/proc/net/udp", "r")) == NULL)
-		handle_missing_file("/proc/net/udp");
+		if ((udp = fopen("/proc/net/udp", "r")) == NULL)
+			handle_missing_file("/proc/net/udp");
 
-	if ((raw = fopen("/proc/net/raw", "r")) == NULL)
-		handle_missing_file("/proc/net/raw");
+		if ((raw = fopen("/proc/net/raw", "r")) == NULL)
+			handle_missing_file("/proc/net/raw");
+	}
 
-	if ((tcp6 = fopen("/proc/net/tcp6", "r")) == NULL)
-		handle_missing_file("/proc/net/tcp6");
+	if (!(o_search & SEARCH_IPV4_ONLY)) {
+		if ((tcp6 = fopen("/proc/net/tcp6", "r")) == NULL)
+			handle_missing_file("/proc/net/tcp6");
 
-	if ((udp6 = fopen("/proc/net/udp6", "r")) == NULL)
-		handle_missing_file("/proc/net/udp6");
+		if ((udp6 = fopen("/proc/net/udp6", "r")) == NULL)
+			handle_missing_file("/proc/net/udp6");
 
-	if ((raw6 = fopen("/proc/net/raw6", "r")) == NULL)
-		handle_missing_file("/proc/net/raw6");
+		if ((raw6 = fopen("/proc/net/raw6", "r")) == NULL)
+			handle_missing_file("/proc/net/raw6");
+	}
 
 	if ((funix = fopen("/proc/net/unix", "r")) == NULL) {
 		/* 
@@ -618,13 +624,15 @@ int main(int argc, char *argv[])
 	/*
 	 * program has been abort()ed if file not available
 	 * except funix
+	 * nowadays IPv6 might be not at all available, so
+	 * when doing -4 the 6 files might be missing
 	 */
-	fclose(tcp);
-	fclose(udp);
-	fclose(raw);
-	fclose(tcp6);
-	fclose(udp6);
-	fclose(raw6);
+	if (tcp) fclose(tcp);
+	if (udp) fclose(udp);
+	if (raw) fclose(raw);
+	if (tcp6) fclose(tcp6);
+	if (udp6) fclose(udp6);
+	if (raw6) fclose(raw6);
 	if (funix) fclose(funix);
 
 	printf("%-8s %-20s %-8s %-6s %-25s %-25s %s\n", "USER", "PROCESS", "PID", "PROTO", "SOURCE ADDRESS", "FOREIGN ADDRESS", "STATE");
